@@ -1,4 +1,4 @@
-/* UART Reply Example
+/* UART Request Handling Example
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -8,6 +8,7 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
@@ -16,9 +17,8 @@
 #include "esp_log.h"
 
 /**
- * This is an example which replies with "Hello, it is me, ESP32" for any data it receives
- * on the configured UART, with hardware flow control turned off.
- * It does not use the UART driver event queue.
+ * This example handles UART communication, responding to requests from the PC
+ * with the first number in an array. If the array is empty, it throws an error message.
  *
  * - Port: configured UART
  * - Receive (Rx) buffer: on
@@ -40,12 +40,39 @@
 static const char *TAG = "UART TEST";
 
 #define BUF_SIZE (1024)
+#define ARRAY_SIZE 10
 #define RESPONSE "Hello, it is me, ESP32"
+#define ERROR_MESSAGE "Error: Array is empty"
+
+// Array of 10 numbers
+int number_array[ARRAY_SIZE] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+int array_length = ARRAY_SIZE;
+
+static void handle_request()
+{
+    char response[BUF_SIZE];
+    
+    if (array_length > 0) {
+        // Prepare the response with the first number in the array
+        snprintf(response, BUF_SIZE, "Number: %d", number_array[0]);
+        
+        // Shift the rest of the numbers
+        for (int i = 1; i < array_length; ++i) {
+            number_array[i - 1] = number_array[i];
+        }
+        array_length--;
+    } else {
+        // Array is empty, prepare error message
+        strncpy(response, ERROR_MESSAGE, BUF_SIZE);
+    }
+    
+    // Send the response or error message
+    uart_write_bytes(ECHO_UART_PORT_NUM, response, strlen(response));
+    ESP_LOGI(TAG, "%s", response);
+}
 
 static void echo_task(void *arg)
 {
-    /* Configure parameters of an UART driver,
-     * communication pins and install the driver */
     uart_config_t uart_config = {
         .baud_rate = ECHO_UART_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -64,16 +91,14 @@ static void echo_task(void *arg)
     ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS));
 
-    // Configure a temporary buffer for the incoming data
     uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
 
     while (1) {
         // Read data from the UART
         int len = uart_read_bytes(ECHO_UART_PORT_NUM, data, (BUF_SIZE - 1), 20 / portTICK_PERIOD_MS);
         if (len > 0) {
-            // Send a reply message instead of echoing
-            uart_write_bytes(ECHO_UART_PORT_NUM, RESPONSE, sizeof(RESPONSE) - 1);
-            ESP_LOGI(TAG, "Received and replied");
+            // Handle the request and respond
+            handle_request();
         }
     }
 }
